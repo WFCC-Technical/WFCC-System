@@ -1,42 +1,44 @@
 <?php
 declare(strict_types=1);
 
-$databaseUrl = getenv('DATABASE_URL') ?: '';
+// Falls back to the Render Internal Database URL if DATABASE_URL isn't set
+// as an environment variable. Internal URLs only resolve inside Render's
+// own network, so this fallback only works when this file is actually
+// running on Render — not on your local PC via XAMPP.
+const RENDER_INTERNAL_DATABASE_URL =
+    'postgresql://wfcc_website_user:dB7CSZ4RZk21u65PHK5wAbtfTH1QnZ9C@dpg-daflnp9t0dsc73emj8m0-a/wfcc_website';
+
+$databaseUrl = getenv('DATABASE_URL') ?: RENDER_INTERNAL_DATABASE_URL;
 
 $status  = '';
 $message = '';
 
-if ($databaseUrl === '') {
+$parts = parse_url($databaseUrl);
+
+if ($parts === false || !isset($parts['host'], $parts['user'], $parts['pass'], $parts['path'])) {
     $status  = 'error';
-    $message = 'DATABASE_URL environment variable is not set.';
+    $message = 'DATABASE_URL is malformed.';
 } else {
-    $parts = parse_url($databaseUrl);
+    $host   = $parts['host'];
+    $port   = $parts['port'] ?? 5432;
+    $dbName = ltrim($parts['path'], '/');
+    $user   = $parts['user'];
+    $pass   = $parts['pass'];
 
-    if ($parts === false || !isset($parts['host'], $parts['user'], $parts['pass'], $parts['path'])) {
+    $dsn = "pgsql:host={$host};port={$port};dbname={$dbName};sslmode=require";
+
+    try {
+        $pdo = new PDO($dsn, $user, $pass, [
+            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+        ]);
+
+        $version = $pdo->query('SELECT version()')->fetchColumn();
+
+        $status  = 'success';
+        $message = "Connected to \"$dbName\" on $host.\n\n" . $version;
+    } catch (Throwable $e) {
         $status  = 'error';
-        $message = 'DATABASE_URL is malformed.';
-    } else {
-        $host   = $parts['host'];
-        $port   = $parts['port'] ?? 5432;
-        $dbName = ltrim($parts['path'], '/');
-        $user   = $parts['user'];
-        $pass   = $parts['pass'];
-
-        $dsn = "pgsql:host={$host};port={$port};dbname={$dbName};sslmode=require";
-
-        try {
-            $pdo = new PDO($dsn, $user, $pass, [
-                PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-            ]);
-
-            $version = $pdo->query('SELECT version()')->fetchColumn();
-
-            $status  = 'success';
-            $message = "Connected to \"$dbName\" on $host.\n\n" . $version;
-        } catch (Throwable $e) {
-            $status  = 'error';
-            $message = $e->getMessage();
-        }
+        $message = $e->getMessage();
     }
 }
 ?>
