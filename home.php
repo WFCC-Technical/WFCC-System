@@ -42,7 +42,8 @@ $user = $_SESSION['user'];
 
         <div class="card">
             <p>You're logged in. This will grow into the full attendance &amp; file monitoring dashboard.</p>
-            <a href="accounts.php" class="btn">View Existing Accounts (optional)</a>
+            <a href="attendance.php" class="btn">Go to Attendance</a>
+            <a href="accounts.php" class="btn" style="background:#fff; color:var(--blue); border:1.5px solid var(--blue); margin-left:8px;">View Existing Accounts (optional)</a>
         </div>
     </div>
 </body>

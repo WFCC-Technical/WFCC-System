@@ -52,6 +52,34 @@ function ensure_users_table(): void
     );
 }
 
+function ensure_attendance_table(): void
+{
+    wfcc_db()->exec(
+        'CREATE TABLE IF NOT EXISTS attendance (
+            id          SERIAL PRIMARY KEY,
+            user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            log_date    DATE NOT NULL,
+            time_in     TIMESTAMPTZ,
+            time_out    TIMESTAMPTZ,
+            UNIQUE (user_id, log_date)
+        )'
+    );
+}
+
+// The server (Render) runs in UTC. Without this, "today" would flip over at
+// 8:00am Philippine time instead of midnight. Every date used for attendance
+// tabs/records goes through this function so it's always Asia/Manila time,
+// regardless of what timezone the server itself is in.
+function wfcc_now(): DateTime
+{
+    return new DateTime('now', new DateTimeZone('Asia/Manila'));
+}
+
+function wfcc_today(): string
+{
+    return wfcc_now()->format('Y-m-d');
+}
+
 function csrf_token(): string
 {
     if (empty($_SESSION['csrf_token'])) {
