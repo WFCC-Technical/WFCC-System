@@ -1,0 +1,68 @@
+<?php
+declare(strict_types=1);
+
+// Falls back to the Render Internal Database URL if DATABASE_URL isn't set
+// as an environment variable. Internal URLs only resolve inside Render's
+// own network — this fallback only works when actually running on Render.
+const RENDER_INTERNAL_DATABASE_URL =
+    'postgresql://wfcc_website_user:dB7CSZ4RZk21u65PHK5wAbtfTH1QnZ9C@dpg-daflnp9t0dsc73emj8m0-a/wfcc_website';
+
+function wfcc_db(): PDO
+{
+    static $pdo = null;
+
+    if ($pdo !== null) {
+        return $pdo;
+    }
+
+    $databaseUrl = getenv('DATABASE_URL') ?: RENDER_INTERNAL_DATABASE_URL;
+    $parts = parse_url($databaseUrl);
+
+    if ($parts === false || !isset($parts['host'], $parts['user'], $parts['pass'], $parts['path'])) {
+        throw new RuntimeException('DATABASE_URL is malformed.');
+    }
+
+    $host   = $parts['host'];
+    $port   = $parts['port'] ?? 5432;
+    $dbName = ltrim($parts['path'], '/');
+    $user   = $parts['user'];
+    $pass   = $parts['pass'];
+
+    $dsn = "pgsql:host={$host};port={$port};dbname={$dbName};sslmode=require";
+
+    $pdo = new PDO($dsn, $user, $pass, [
+        PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
+        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+        PDO::ATTR_EMULATE_PREPARES   => false,
+    ]);
+
+    return $pdo;
+}
+
+function ensure_users_table(): void
+{
+    wfcc_db()->exec(
+        'CREATE TABLE IF NOT EXISTS users (
+            id              SERIAL PRIMARY KEY,
+            full_name       VARCHAR(150) NOT NULL,
+            email           VARCHAR(150) NOT NULL UNIQUE,
+            password_hash   VARCHAR(255) NOT NULL,
+            created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )'
+    );
+}
+
+function csrf_token(): string
+{
+    if (empty($_SESSION['csrf_token'])) {
+        $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+    }
+    return $_SESSION['csrf_token'];
+}
+
+function csrf_verify(?string $token): bool
+{
+    return !empty($_SESSION['csrf_token'])
+        && is_string($token)
+        && hash_equals($_SESSION['csrf_token'], $token);
+}

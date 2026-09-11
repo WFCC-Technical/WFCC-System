@@ -7,7 +7,7 @@ RUN apt-get update \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-COPY index.php /var/www/html/index.php
+COPY . /var/www/html/
 
 # Render assigns a random $PORT at runtime; Apache must listen on it.
 CMD sh -c "sed -i \"s/80/\${PORT:-10000}/g\" /etc/apache2/ports.conf /etc/apache2/sites-available/000-default.conf && apache2-foreground"

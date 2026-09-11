@@ -1,44 +1,91 @@
 <?php
 declare(strict_types=1);
 
-// Falls back to the Render Internal Database URL if DATABASE_URL isn't set
-// as an environment variable. Internal URLs only resolve inside Render's
-// own network, so this fallback only works when this file is actually
-// running on Render — not on your local PC via XAMPP.
-const RENDER_INTERNAL_DATABASE_URL =
-    'postgresql://wfcc_website_user:dB7CSZ4RZk21u65PHK5wAbtfTH1QnZ9C@dpg-daflnp9t0dsc73emj8m0-a/wfcc_website';
+session_start();
+require_once __DIR__ . '/config.php';
 
-$databaseUrl = getenv('DATABASE_URL') ?: RENDER_INTERNAL_DATABASE_URL;
+if (!empty($_SESSION['user'])) {
+    header('Location: home.php');
+    exit;
+}
 
-$status  = '';
-$message = '';
+$tab = ($_GET['tab'] ?? 'login') === 'register' ? 'register' : 'login';
+$error = '';
+$success = '';
 
-$parts = parse_url($databaseUrl);
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    if (!csrf_verify($_POST['csrf_token'] ?? null)) {
+        $error = 'Your session expired. Please try again.';
+    } else {
+        $action = $_POST['action'] ?? '';
 
-if ($parts === false || !isset($parts['host'], $parts['user'], $parts['pass'], $parts['path'])) {
-    $status  = 'error';
-    $message = 'DATABASE_URL is malformed.';
-} else {
-    $host   = $parts['host'];
-    $port   = $parts['port'] ?? 5432;
-    $dbName = ltrim($parts['path'], '/');
-    $user   = $parts['user'];
-    $pass   = $parts['pass'];
+        if ($action === 'register') {
+            $tab = 'register';
+            $fullName = trim($_POST['full_name'] ?? '');
+            $email    = trim($_POST['email'] ?? '');
+            $password = (string)($_POST['password'] ?? '');
+            $confirm  = (string)($_POST['confirm_password'] ?? '');
 
-    $dsn = "pgsql:host={$host};port={$port};dbname={$dbName};sslmode=require";
+            if ($fullName === '' || $email === '' || $password === '') {
+                $error = 'All fields are required.';
+            } elseif ($password !== $confirm) {
+                $error = 'Passwords do not match.';
+            } elseif (strlen($password) < 8) {
+                $error = 'Password must be at least 8 characters.';
+            } else {
+                try {
+                    ensure_users_table();
+                    $pdo = wfcc_db();
+                    $check = $pdo->prepare('SELECT id FROM users WHERE email = :email');
+                    $check->execute(['email' => $email]);
 
-    try {
-        $pdo = new PDO($dsn, $user, $pass, [
-            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-        ]);
+                    if ($check->fetch()) {
+                        $error = 'An account with that email already exists.';
+                    } else {
+                        $stmt = $pdo->prepare(
+                            'INSERT INTO users (full_name, email, password_hash) VALUES (:name, :email, :hash)'
+                        );
+                        $stmt->execute([
+                            'name'  => $fullName,
+                            'email' => $email,
+                            'hash'  => password_hash($password, PASSWORD_BCRYPT),
+                        ]);
+                        $tab = 'login';
+                        $success = 'Account created! You can now log in below.';
+                    }
+                } catch (Throwable $e) {
+                    $error = 'Could not reach the database: ' . $e->getMessage();
+                }
+            }
+        } elseif ($action === 'login') {
+            $tab = 'login';
+            $email    = trim($_POST['login_email'] ?? '');
+            $password = (string)($_POST['login_password'] ?? '');
 
-        $version = $pdo->query('SELECT version()')->fetchColumn();
+            if ($email === '' || $password === '') {
+                $error = 'Please enter your email and password.';
+            } else {
+                try {
+                    ensure_users_table();
+                    $pdo = wfcc_db();
+                    $stmt = $pdo->prepare('SELECT * FROM users WHERE email = :email LIMIT 1');
+                    $stmt->execute(['email' => $email]);
+                    $user = $stmt->fetch();
 
-        $status  = 'success';
-        $message = "Connected to \"$dbName\" on $host.\n\n" . $version;
-    } catch (Throwable $e) {
-        $status  = 'error';
-        $message = $e->getMessage();
+                    if (!$user || !password_verify($password, $user['password_hash'])) {
+                        $error = 'Invalid email or password.';
+                    } else {
+                        session_regenerate_id(true);
+                        unset($user['password_hash']);
+                        $_SESSION['user'] = $user;
+                        header('Location: home.php');
+                        exit;
+                    }
+                } catch (Throwable $e) {
+                    $error = 'Could not reach the database: ' . $e->getMessage();
+                }
+            }
+        }
     }
 }
 ?>
@@ -46,53 +93,69 @@ if ($parts === false || !isset($parts['host'], $parts['user'], $parts['pass'], $
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>WFCC — Render DB Connection Test</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WFCC Attendance System</title>
     <style>
-        body {
-            font-family: 'Segoe UI', Roboto, Arial, sans-serif;
-            background: #0b3d63;
-            color: #fff;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            height: 100vh;
-            margin: 0;
-        }
-        .card {
-            background: #fff;
-            color: #1f2a33;
-            padding: 32px;
-            border-radius: 12px;
-            max-width: 520px;
-            width: 90%;
-            box-shadow: 0 20px 40px rgba(0,0,0,0.25);
-        }
-        h1 { font-size: 1.1rem; margin: 0 0 16px; color: #0b3d63; }
-        .badge {
-            display: inline-block;
-            padding: 4px 12px;
-            border-radius: 999px;
-            font-weight: 600;
-            font-size: 0.85rem;
-            margin-bottom: 14px;
-        }
-        .success { background: #e6f4ea; color: #1e7e34; }
-        .error   { background: #fdecea; color: #b3261e; }
-        pre {
-            background: #f2f4f6;
-            padding: 12px;
-            border-radius: 8px;
-            white-space: pre-wrap;
-            word-break: break-word;
-            font-size: 0.85rem;
-        }
+        :root { --blue:#0b3d63; --blue-dark:#082c48; --gray:#f2f4f6; --text:#1f2a33; }
+        * { box-sizing: border-box; }
+        body { margin:0; font-family:'Segoe UI',Roboto,Arial,sans-serif; background:linear-gradient(135deg,var(--blue),var(--blue-dark)); min-height:100vh; display:flex; align-items:center; justify-content:center; }
+        .card { background:#fff; width:100%; max-width:380px; border-radius:12px; padding:36px 32px; box-shadow:0 20px 40px rgba(0,0,0,0.25); margin:20px; }
+        .brand { text-align:center; margin-bottom:20px; }
+        .brand h1 { font-size:1.2rem; color:var(--blue); margin:0 0 4px; }
+        .brand p { font-size:0.85rem; color:#6b7280; margin:0; }
+        .tabs { display:flex; border-bottom:1px solid #e5e7eb; margin-bottom:18px; }
+        .tab { flex:1; text-align:center; padding:10px 0; text-decoration:none; font-size:0.9rem; font-weight:600; color:#9ca3af; border-bottom:2px solid transparent; margin-bottom:-1px; }
+        .tab-active { color:var(--blue); border-bottom-color:var(--blue); }
+        label { display:block; font-size:0.85rem; font-weight:600; color:var(--text); margin:14px 0 6px; }
+        input { width:100%; padding:10px 12px; border:1px solid #d1d5db; border-radius:8px; font-size:0.95rem; }
+        input:focus { outline:none; border-color:var(--blue); box-shadow:0 0 0 3px rgba(11,61,99,0.12); }
+        button { width:100%; margin-top:20px; padding:12px; background:var(--blue); color:#fff; border:none; border-radius:8px; font-size:1rem; font-weight:600; cursor:pointer; }
+        button:hover { background:var(--blue-dark); }
+        .alert { padding:10px 12px; border-radius:8px; font-size:0.85rem; margin-bottom:6px; }
+        .alert-error { background:#fdecea; color:#b3261e; border:1px solid #f5c2c0; }
+        .alert-info { background:#eaf0fb; color:#2952a3; border:1px solid #c9d8f5; }
     </style>
 </head>
 <body>
     <div class="card">
-        <h1>WFCC — Render Database Connection Test</h1>
-        <span class="badge <?= $status ?>"><?= $status === 'success' ? 'CONNECTED' : 'FAILED' ?></span>
-        <pre><?= htmlspecialchars($message) ?></pre>
+        <div class="brand">
+            <h1>W.F. Construction Corp.</h1>
+            <p>Attendance &amp; File Monitoring System</p>
+        </div>
+
+        <div class="tabs">
+            <a href="?tab=login" class="tab <?= $tab === 'login' ? 'tab-active' : '' ?>">Log In</a>
+            <a href="?tab=register" class="tab <?= $tab === 'register' ? 'tab-active' : '' ?>">Register</a>
+        </div>
+
+        <?php if ($error): ?><div class="alert alert-error"><?= htmlspecialchars($error) ?></div><?php endif; ?>
+        <?php if ($success): ?><div class="alert alert-info"><?= htmlspecialchars($success) ?></div><?php endif; ?>
+
+        <?php if ($tab === 'login'): ?>
+            <form method="POST" action="index.php">
+                <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrf_token()) ?>">
+                <input type="hidden" name="action" value="login">
+                <label>Email</label>
+                <input type="email" name="login_email" required autofocus>
+                <label>Password</label>
+                <input type="password" name="login_password" required>
+                <button type="submit">Log In</button>
+            </form>
+        <?php else: ?>
+            <form method="POST" action="index.php">
+                <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrf_token()) ?>">
+                <input type="hidden" name="action" value="register">
+                <label>Full Name</label>
+                <input type="text" name="full_name" required value="<?= htmlspecialchars($_POST['full_name'] ?? '') ?>">
+                <label>Email</label>
+                <input type="email" name="email" required value="<?= htmlspecialchars($_POST['email'] ?? '') ?>">
+                <label>Password</label>
+                <input type="password" name="password" required>
+                <label>Confirm Password</label>
+                <input type="password" name="confirm_password" required>
+                <button type="submit">Create Account</button>
+            </form>
+        <?php endif; ?>
     </div>
 </body>
 </html>
