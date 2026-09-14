@@ -102,10 +102,10 @@ function is_admin(array $user): bool
     return ($user['role'] ?? '') === 'Admin';
 }
 
-// Projects section is open to every role except Worker.
+// Projects section is open to every role except Worker and Applicant.
 function can_view_projects(array $user): bool
 {
-    return ($user['role'] ?? '') !== 'Worker';
+    return !in_array($user['role'] ?? '', ['Worker', 'Applicant'], true);
 }
 
 function ensure_attendance_table(): void
