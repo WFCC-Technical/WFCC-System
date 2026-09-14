@@ -11,10 +11,9 @@ if (empty($_SESSION['user'])) {
 
 $currentUser = $_SESSION['user'];
 
-if (!is_admin($currentUser)) {
-    header('Location: home.php');
-    exit;
-}
+// NOTE: temporarily open to any logged-in user while existing accounts are
+// still being assigned roles for the first time. Re-add the is_admin()
+// gate here once every account has a proper role set.
 
 ensure_users_table();
 $pdo = wfcc_db();
