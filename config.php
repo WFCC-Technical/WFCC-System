@@ -108,6 +108,23 @@ function can_view_projects(array $user): bool
     return !in_array($user['role'] ?? '', ['Worker', 'Applicant'], true);
 }
 
+// The "workforce" side of the roster — kept separate from admin/office
+// roles on the Attendance page. Workers and Applicants only ever see
+// this group; everyone else sees both groups in separate containers.
+const WFCC_WORKFORCE_ROLES = ['Worker', 'Applicant'];
+
+function is_workforce(array $user): bool
+{
+    return in_array($user['role'] ?? '', WFCC_WORKFORCE_ROLES, true);
+}
+
+// Applicants are on the roster but don't clock in/out themselves
+// (e.g. they aren't on-site yet). Every other role can.
+function can_clock_attendance(array $user): bool
+{
+    return ($user['role'] ?? '') !== 'Applicant';
+}
+
 function ensure_attendance_table(): void
 {
     wfcc_db()->exec(

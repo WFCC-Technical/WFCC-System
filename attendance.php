@@ -66,13 +66,22 @@ $isToday = $activeDate === $today;
 
 // Every employee's status for the active date (LEFT JOIN so absentees still show up).
 $stmt = $pdo->prepare(
-    'SELECT u.id, u.full_name, u.email, a.time_in, a.time_out
+    'SELECT u.id, u.full_name, u.email, u.role, a.time_in, a.time_out
      FROM users u
      LEFT JOIN attendance a ON a.user_id = u.id AND a.log_date = :date
      ORDER BY u.full_name'
 );
 $stmt->execute(['date' => $activeDate]);
-$rows = $stmt->fetchAll();
+$allRows = $stmt->fetchAll();
+
+// Workers/Applicants only ever see the workforce group. Everyone else sees
+// both groups, split into separate containers (administration vs workforce).
+$viewerIsWorkforce = is_workforce($currentUser);
+$workforceRows = array_values(array_filter($allRows, fn($r) => is_workforce($r)));
+$adminRows = $viewerIsWorkforce ? [] : array_values(array_filter($allRows, fn($r) => !is_workforce($r)));
+$rows = $viewerIsWorkforce ? $workforceRows : $allRows;
+
+$canClock = can_clock_attendance($currentUser);
 
 $myRow = null;
 foreach ($rows as $r) {
@@ -85,6 +94,37 @@ foreach ($rows as $r) {
 function fmt_time(?string $ts): string
 {
     return $ts ? (new DateTime($ts))->setTimezone(new DateTimeZone('Asia/Manila'))->format('h:i A') : '—';
+}
+
+function render_roster_table(array $rows, array $currentUser): void
+{
+    if (!$rows) {
+        echo '<p class="empty">No accounts in this group.</p>';
+        return;
+    }
+    ?>
+    <table>
+        <thead>
+            <tr><th>Name</th><th>Time In</th><th>Time Out</th><th>Status</th></tr>
+        </thead>
+        <tbody>
+            <?php foreach ($rows as $r): ?>
+                <?php
+                    $isMe = (int)$r['id'] === (int)$currentUser['id'];
+                    $badge = 'badge-none'; $label = 'Not clocked in';
+                    if ($r['time_in'] && $r['time_out']) { $badge = 'badge-out'; $label = 'Done'; }
+                    elseif ($r['time_in']) { $badge = 'badge-in'; $label = 'Present'; }
+                ?>
+                <tr class="<?= $isMe ? 'me' : '' ?>">
+                    <td><?= htmlspecialchars($r['full_name']) ?><?= $isMe ? ' (you)' : '' ?></td>
+                    <td><?= fmt_time($r['time_in']) ?></td>
+                    <td><?= fmt_time($r['time_out']) ?></td>
+                    <td><span class="badge <?= $badge ?>"><?= $label ?></span></td>
+                </tr>
+            <?php endforeach; ?>
+        </tbody>
+    </table>
+    <?php
 }
 ?>
 <!DOCTYPE html>
@@ -105,7 +145,9 @@ function fmt_time(?string $ts): string
         .tab { flex:0 0 auto; padding:8px 14px; border-radius:8px 8px 0 0; background:#e5e7eb; color:#4b5563; text-decoration:none; font-size:0.85rem; font-weight:600; white-space:nowrap; }
         .tab-active { background:#fff; color:var(--blue); box-shadow:0 -2px 8px rgba(0,0,0,0.06); }
         .tab-today::after { content:" •"; color:#1e7e34; }
-        .card { background:#fff; border-radius:0 12px 12px 12px; padding:24px; box-shadow:0 4px 16px rgba(0,0,0,0.06); }
+        .card { background:#fff; border-radius:0 12px 12px 12px; padding:24px; box-shadow:0 4px 16px rgba(0,0,0,0.06); margin-bottom:16px; }
+        .empty { color:#9ca3af; font-size:0.9rem; }
+        .group-title { margin:0 0 14px; color:var(--blue); font-size:0.95rem; }
         .alert { padding:10px 12px; border-radius:8px; font-size:0.85rem; margin-bottom:14px; }
         .alert-error { background:#fdecea; color:#b3261e; border:1px solid #f5c2c0; }
         .alert-info { background:#eaf0fb; color:#2952a3; border:1px solid #c9d8f5; }
@@ -150,8 +192,8 @@ function fmt_time(?string $ts): string
         </div>
 
         <div class="card">
-            <?php if ($isToday): ?>
-                <form method="POST" style="margin-bottom:18px;">
+            <?php if ($isToday && $canClock): ?>
+                <form method="POST">
                     <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrf_token()) ?>">
                     <span style="font-size:0.9rem; margin-right:10px;">
                         Your status: <strong><?= fmt_time($myRow['time_in'] ?? null) ?> – <?= fmt_time($myRow['time_out'] ?? null) ?></strong>
@@ -161,32 +203,28 @@ function fmt_time(?string $ts): string
                     <button type="submit" name="action" value="clock_out" class="btn-out"
                         <?= (!$myRow || !$myRow['time_in'] || $myRow['time_out']) ? 'disabled' : '' ?>>Clock Out</button>
                 </form>
+            <?php elseif ($isToday): ?>
+                <p class="clock" style="margin:0;">Applicants don't clock in/out — this starts once you're onboarded as a Worker.</p>
             <?php else: ?>
-                <p class="clock" style="margin-bottom:14px;">Viewing a past date — read only.</p>
+                <p class="clock" style="margin:0;">Viewing a past date — read only.</p>
             <?php endif; ?>
-
-            <table>
-                <thead>
-                    <tr><th>Name</th><th>Time In</th><th>Time Out</th><th>Status</th></tr>
-                </thead>
-                <tbody>
-                    <?php foreach ($rows as $r): ?>
-                        <?php
-                            $isMe = (int)$r['id'] === (int)$currentUser['id'];
-                            $badge = 'badge-none'; $label = 'Not clocked in';
-                            if ($r['time_in'] && $r['time_out']) { $badge = 'badge-out'; $label = 'Done'; }
-                            elseif ($r['time_in']) { $badge = 'badge-in'; $label = 'Present'; }
-                        ?>
-                        <tr class="<?= $isMe ? 'me' : '' ?>">
-                            <td><?= htmlspecialchars($r['full_name']) ?><?= $isMe ? ' (you)' : '' ?></td>
-                            <td><?= fmt_time($r['time_in']) ?></td>
-                            <td><?= fmt_time($r['time_out']) ?></td>
-                            <td><span class="badge <?= $badge ?>"><?= $label ?></span></td>
-                        </tr>
-                    <?php endforeach; ?>
-                </tbody>
-            </table>
         </div>
+
+        <?php if ($viewerIsWorkforce): ?>
+            <div class="card">
+                <h3 class="group-title">Workforce</h3>
+                <?php render_roster_table($workforceRows, $currentUser); ?>
+            </div>
+        <?php else: ?>
+            <div class="card">
+                <h3 class="group-title">Administration</h3>
+                <?php render_roster_table($adminRows, $currentUser); ?>
+            </div>
+            <div class="card">
+                <h3 class="group-title">Workforce</h3>
+                <?php render_roster_table($workforceRows, $currentUser); ?>
+            </div>
+        <?php endif; ?>
     </div>
 
     <script>
