@@ -102,6 +102,12 @@ function is_admin(array $user): bool
     return ($user['role'] ?? '') === 'Admin';
 }
 
+// Projects section is open to every role except Worker.
+function can_view_projects(array $user): bool
+{
+    return ($user['role'] ?? '') !== 'Worker';
+}
+
 function ensure_attendance_table(): void
 {
     wfcc_db()->exec(

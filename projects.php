@@ -11,6 +11,11 @@ if (empty($_SESSION['user'])) {
 
 $currentUser = $_SESSION['user'];
 
+if (!can_view_projects($currentUser)) {
+    header('Location: home.php');
+    exit;
+}
+
 ensure_projects_table();
 ensure_project_documents_table();
 $pdo = wfcc_db();
