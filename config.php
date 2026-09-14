@@ -38,7 +38,39 @@ function wfcc_db(): PDO
 
     return $pdo;
 }
+/////////////////////////////////////////////////////////////////////////////////////////////////////
+const WFCC_PROJECT_STATUSES = ['Ongoing', 'Finished'];
 
+function ensure_projects_table(): void
+{
+    wfcc_db()->exec(
+        "CREATE TABLE IF NOT EXISTS projects (
+            id SERIAL PRIMARY KEY,
+            name VARCHAR(150) NOT NULL,
+            status VARCHAR(10) NOT NULL DEFAULT 'Ongoing',
+            created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )"
+    );
+}
+
+function ensure_project_documents_table(): void
+{
+    wfcc_db()->exec(
+        "CREATE TABLE IF NOT EXISTS project_documents (
+            id SERIAL PRIMARY KEY,
+            project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            uploaded_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            file_name VARCHAR(255) NOT NULL,
+            mime_type VARCHAR(100) NOT NULL,
+            file_size INTEGER NOT NULL,
+            file_data BYTEA NOT NULL,
+            uploaded_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )"
+    );
+}
+
+//////////////////////////////////////////////////////////////////////////////////////////////
 // The fixed set of roles the system recognizes. Kept in one place so the
 // register/login flow, the accounts page dropdown, and any future
 // permission checks all draw from the same list.
