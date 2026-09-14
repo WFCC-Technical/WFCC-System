@@ -39,17 +39,35 @@ function wfcc_db(): PDO
     return $pdo;
 }
 
+// The fixed set of roles the system recognizes. Kept in one place so the
+// register/login flow, the accounts page dropdown, and any future
+// permission checks all draw from the same list.
+const WFCC_ROLES = [
+    'Admin', 'Architect', 'HR', 'Procurement', 'Finance',
+    'Accountant', 'Engineer', 'Worker', 'Applicant',
+];
+
 function ensure_users_table(): void
 {
-    wfcc_db()->exec(
-        'CREATE TABLE IF NOT EXISTS users (
+    $pdo = wfcc_db();
+    $pdo->exec(
+        "CREATE TABLE IF NOT EXISTS users (
             id              SERIAL PRIMARY KEY,
             full_name       VARCHAR(150) NOT NULL,
             email           VARCHAR(150) NOT NULL UNIQUE,
             password_hash   VARCHAR(255) NOT NULL,
+            role            VARCHAR(20) NOT NULL DEFAULT 'Applicant',
             created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )'
+        )"
     );
+    // Migration safety net for databases created before roles existed —
+    // adds the column with a safe default if it isn't there yet.
+    $pdo->exec("ALTER TABLE users ADD COLUMN IF NOT EXISTS role VARCHAR(20) NOT NULL DEFAULT 'Applicant'");
+}
+
+function is_admin(array $user): bool
+{
+    return ($user['role'] ?? '') === 'Admin';
 }
 
 function ensure_attendance_table(): void

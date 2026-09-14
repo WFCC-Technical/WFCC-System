@@ -35,7 +35,7 @@ $user = $_SESSION['user'];
         <div class="header">
             <div>
                 <h2>Welcome, <?= htmlspecialchars($user['full_name']) ?></h2>
-                <p><?= htmlspecialchars($user['email']) ?></p>
+                <p><?= htmlspecialchars($user['email']) ?> · <?= htmlspecialchars($user['role'] ?? 'Applicant') ?></p>
             </div>
             <a href="logout.php">Log out</a>
         </div>
@@ -43,7 +43,9 @@ $user = $_SESSION['user'];
         <div class="card">
             <p>You're logged in. This will grow into the full attendance &amp; file monitoring dashboard.</p>
             <a href="attendance.php" class="btn">Go to Attendance</a>
-            <a href="accounts.php" class="btn" style="background:#fff; color:var(--blue); border:1.5px solid var(--blue); margin-left:8px;">View Existing Accounts (optional)</a>
+            <?php if (is_admin($user)): ?>
+                <a href="accounts.php" class="btn" style="background:#fff; color:var(--blue); border:1.5px solid var(--blue); margin-left:8px;">View Accounts</a>
+            <?php endif; ?>
         </div>
     </div>
 </body>

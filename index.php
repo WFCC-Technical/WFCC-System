@@ -42,16 +42,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     if ($check->fetch()) {
                         $error = 'An account with that email already exists.';
                     } else {
+                        // Bootstraps the system: the very first account ever
+                        // created becomes Admin (so there's someone able to
+                        // assign roles from the start); everyone after that
+                        // starts as Applicant until an Admin promotes them.
+                        $isFirstUser = (int)$pdo->query('SELECT COUNT(*) AS c FROM users')->fetch()['c'] === 0;
+                        $role = $isFirstUser ? 'Admin' : 'Applicant';
+
                         $stmt = $pdo->prepare(
-                            'INSERT INTO users (full_name, email, password_hash) VALUES (:name, :email, :hash)'
+                            'INSERT INTO users (full_name, email, password_hash, role) VALUES (:name, :email, :hash, :role)'
                         );
                         $stmt->execute([
                             'name'  => $fullName,
                             'email' => $email,
                             'hash'  => password_hash($password, PASSWORD_BCRYPT),
+                            'role'  => $role,
                         ]);
                         $tab = 'login';
-                        $success = 'Account created! You can now log in below.';
+                        $success = $isFirstUser
+                            ? 'Account created as Admin (first account on the system). You can now log in below.'
+                            : 'Account created! You can now log in below.';
                     }
                 } catch (Throwable $e) {
                     $error = 'Could not reach the database: ' . $e->getMessage();

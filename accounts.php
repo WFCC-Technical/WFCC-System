@@ -10,6 +10,15 @@ if (empty($_SESSION['user'])) {
 }
 
 $currentUser = $_SESSION['user'];
+
+if (!is_admin($currentUser)) {
+    header('Location: home.php');
+    exit;
+}
+
+ensure_users_table();
+$pdo = wfcc_db();
+
 $message = '';
 $messageType = 'info';
 
@@ -18,72 +27,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $message = 'Your session expired. Please try again.';
         $messageType = 'error';
     } else {
-        $action = $_POST['action'] ?? '';
-        $userId = (int)($_POST['user_id'] ?? 0);
+        $targetId = (int)($_POST['user_id'] ?? 0);
+        $newRole  = (string)($_POST['role'] ?? '');
 
-        try {
-            $pdo = wfcc_db();
-
-            if ($action === 'update') {
-                $fullName    = trim($_POST['full_name'] ?? '');
-                $email       = trim($_POST['email'] ?? '');
-                $newPassword = (string)($_POST['new_password'] ?? '');
-
-                if ($fullName === '' || $email === '') {
-                    $message = 'Name and email cannot be blank.';
-                    $messageType = 'error';
-                } else {
-                    $check = $pdo->prepare('SELECT id FROM users WHERE email = :email AND id != :id');
-                    $check->execute(['email' => $email, 'id' => $userId]);
-
-                    if ($check->fetch()) {
-                        $message = 'That email is already used by another account.';
-                        $messageType = 'error';
-                    } elseif ($newPassword !== '' && strlen($newPassword) < 8) {
-                        $message = 'New password must be at least 8 characters.';
-                        $messageType = 'error';
-                    } else {
-                        if ($newPassword !== '') {
-                            $stmt = $pdo->prepare('UPDATE users SET full_name = :name, email = :email, password_hash = :hash WHERE id = :id');
-                            $stmt->execute(['name' => $fullName, 'email' => $email, 'hash' => password_hash($newPassword, PASSWORD_BCRYPT), 'id' => $userId]);
-                        } else {
-                            $stmt = $pdo->prepare('UPDATE users SET full_name = :name, email = :email WHERE id = :id');
-                            $stmt->execute(['name' => $fullName, 'email' => $email, 'id' => $userId]);
-                        }
-                        $message = 'Account updated.';
-
-                        if ($userId === (int)$currentUser['id']) {
-                            $_SESSION['user']['full_name'] = $fullName;
-                            $_SESSION['user']['email'] = $email;
-                            $currentUser = $_SESSION['user'];
-                        }
-                    }
-                }
-            } elseif ($action === 'delete') {
-                if ($userId === (int)$currentUser['id']) {
-                    $message = 'You cannot delete your own account while logged in as it.';
-                    $messageType = 'error';
-                } else {
-                    $stmt = $pdo->prepare('DELETE FROM users WHERE id = :id');
-                    $stmt->execute(['id' => $userId]);
-                    $message = 'Account deleted.';
-                }
-            }
-        } catch (Throwable $e) {
-            $message = 'Action failed: ' . $e->getMessage();
+        if (!in_array($newRole, WFCC_ROLES, true)) {
+            $message = 'Not a valid role.';
             $messageType = 'error';
+        } elseif ($targetId === (int)$currentUser['id'] && $newRole !== 'Admin') {
+            // Guard rail: an Admin can't demote themselves and get locked
+            // out of this page (there'd be no one left to fix it).
+            $message = "You can't remove your own Admin role from here.";
+            $messageType = 'error';
+        } else {
+            $stmt = $pdo->prepare('UPDATE users SET role = :role WHERE id = :id');
+            $stmt->execute(['role' => $newRole, 'id' => $targetId]);
+
+            // Keep the session's own role in sync if the admin edited themself.
+            if ($targetId === (int)$currentUser['id']) {
+                $_SESSION['user']['role'] = $newRole;
+                $currentUser = $_SESSION['user'];
+            }
+
+            $message = 'Role updated.';
         }
     }
 }
 
-try {
-    ensure_users_table();
-    $users = wfcc_db()->query('SELECT id, full_name, email, created_at FROM users ORDER BY created_at DESC')->fetchAll();
-} catch (Throwable $e) {
-    $users = [];
-    $message = 'Could not load accounts: ' . $e->getMessage();
-    $messageType = 'error';
-}
+$rows = $pdo->query('SELECT id, full_name, email, role, created_at FROM users ORDER BY full_name')->fetchAll();
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -94,29 +64,31 @@ try {
     <style>
         :root { --blue:#0b3d63; --gray:#f2f4f6; --text:#1f2a33; }
         body { margin:0; font-family:'Segoe UI',Roboto,Arial,sans-serif; background:var(--gray); }
-        .wrap { max-width:900px; margin:50px auto; padding:0 20px; }
-        .header { display:flex; justify-content:space-between; align-items:flex-end; margin-bottom:20px; }
+        .wrap { max-width:820px; margin:40px auto; padding:0 20px; }
+        .header { display:flex; justify-content:space-between; align-items:flex-end; margin-bottom:18px; }
         .header h2 { margin:0 0 4px; color:var(--blue); }
         .header a { color:var(--blue); font-weight:600; text-decoration:none; font-size:0.9rem; margin-left:14px; }
         .card { background:#fff; border-radius:12px; padding:24px; box-shadow:0 4px 16px rgba(0,0,0,0.06); }
         .alert { padding:10px 12px; border-radius:8px; font-size:0.85rem; margin-bottom:14px; }
         .alert-error { background:#fdecea; color:#b3261e; border:1px solid #f5c2c0; }
         .alert-info { background:#eaf0fb; color:#2952a3; border:1px solid #c9d8f5; }
-        .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:16px; margin-top:12px; }
-        .row { border:1px solid #e5e7eb; border-radius:10px; padding:16px; background:#fafafa; }
-        .row label { display:block; font-size:0.8rem; font-weight:600; margin:10px 0 4px; }
-        .row input { width:100%; padding:8px 10px; border:1px solid #d1d5db; border-radius:6px; font-size:0.9rem; box-sizing:border-box; }
-        .actions { display:flex; gap:8px; margin-top:14px; }
-        .actions button { flex:1; padding:8px; border-radius:6px; font-weight:600; font-size:0.85rem; cursor:pointer; }
-        .btn-save { background:var(--blue); color:#fff; border:none; }
-        .btn-delete { background:#fff; color:#b3261e; border:1.5px solid #b3261e; }
-        .muted { color:#6b7280; font-size:0.8rem; }
+        table { width:100%; border-collapse:collapse; font-size:0.9rem; }
+        th { text-align:left; font-size:0.75rem; text-transform:uppercase; color:#6b7280; padding:8px 6px; border-bottom:1px solid #e5e7eb; }
+        td { padding:10px 6px; border-bottom:1px solid #f0f0f0; vertical-align:middle; }
+        .me { background:#f5f9ff; }
+        select.role-select { padding:6px 8px; border:1px solid #d1d5db; border-radius:6px; font-size:0.85rem; font-weight:600; color:var(--blue); background:#fff; }
+        select.role-select:focus { outline:none; border-color:var(--blue); }
+        .hint { font-size:0.75rem; color:#9ca3af; margin-top:2px; }
+        noscript button { margin-left:6px; padding:5px 10px; border-radius:6px; border:1.5px solid var(--blue); background:#fff; color:var(--blue); font-weight:600; font-size:0.78rem; cursor:pointer; }
     </style>
 </head>
 <body>
     <div class="wrap">
         <div class="header">
-            <h2>Existing Accounts (<?= count($users) ?>)</h2>
+            <div>
+                <h2>Accounts</h2>
+                <p class="hint">Assign or change each user's role.</p>
+            </div>
             <div>
                 <a href="home.php">Home</a>
                 <a href="logout.php">Log out</a>
@@ -128,33 +100,34 @@ try {
         <?php endif; ?>
 
         <div class="card">
-            <?php if (empty($users)): ?>
-                <p class="muted">No accounts yet.</p>
-            <?php else: ?>
-                <div class="grid">
-                    <?php foreach ($users as $u): ?>
-                        <form method="POST" class="row">
-                            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrf_token()) ?>">
-                            <input type="hidden" name="user_id" value="<?= (int)$u['id'] ?>">
-
-                            <label>Name</label>
-                            <input type="text" name="full_name" value="<?= htmlspecialchars($u['full_name']) ?>" required>
-
-                            <label>Email</label>
-                            <input type="email" name="email" value="<?= htmlspecialchars($u['email']) ?>" required>
-
-                            <label>New Password <span class="muted">(blank = keep current)</span></label>
-                            <input type="password" name="new_password" placeholder="At least 8 characters">
-
-                            <div class="actions">
-                                <button type="submit" name="action" value="update" class="btn-save">Save</button>
-                                <button type="submit" name="action" value="delete" class="btn-delete"
-                                    onclick="return confirm('Delete this account? This cannot be undone.');">Delete</button>
-                            </div>
-                        </form>
+            <table>
+                <thead>
+                    <tr><th>Name</th><th>Email</th><th>Role</th></tr>
+                </thead>
+                <tbody>
+                    <?php foreach ($rows as $r): ?>
+                        <?php $isMe = (int)$r['id'] === (int)$currentUser['id']; ?>
+                        <tr class="<?= $isMe ? 'me' : '' ?>">
+                            <td><?= htmlspecialchars($r['full_name']) ?><?= $isMe ? ' (you)' : '' ?></td>
+                            <td><?= htmlspecialchars($r['email']) ?></td>
+                            <td>
+                                <form method="POST" style="display:flex; align-items:center; gap:6px;">
+                                    <input type="hidden" name="csrf_token" value="<?= htmlspecialchars(csrf_token()) ?>">
+                                    <input type="hidden" name="user_id" value="<?= (int)$r['id'] ?>">
+                                    <select name="role" class="role-select" onchange="this.form.submit()">
+                                        <?php foreach (WFCC_ROLES as $roleOption): ?>
+                                            <option value="<?= htmlspecialchars($roleOption) ?>" <?= $roleOption === $r['role'] ? 'selected' : '' ?>>
+                                                <?= htmlspecialchars($roleOption) ?>
+                                            </option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                    <noscript><button type="submit">Save</button></noscript>
+                                </form>
+                            </td>
+                        </tr>
                     <?php endforeach; ?>
-                </div>
-            <?php endif; ?>
+                </tbody>
+            </table>
         </div>
     </div>
 </body>
