@@ -5,7 +5,7 @@ declare(strict_types=1);
 // as an environment variable. Internal URLs only resolve inside Render's
 // own network — this fallback only works when actually running on Render.
 const RENDER_INTERNAL_DATABASE_URL =
-    'postgresql://wfcc_website_user:dB7CSZ4RZk21u65PHK5wAbtfTH1QnZ9C@dpg-daflnp9t0dsc73emj8m0-a/wfcc_website';
+    'postgresql://wfcc_database_user:FY9K1Cw7WQtUtaHozOHsGnstGNjD7xbE@dpg-db3lnkui0phs73amoo6g-a/wfcc_database';
 
 function wfcc_db(): PDO
 {
